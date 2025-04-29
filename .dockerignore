@@ -4,5 +4,11 @@ output/
 data/
 logs/
 data*/
-Dockerfile*
+Dockerfile
 hydra_log
+# Ignore build artificats
+build/
+dist/
+# Ignore any tar or tgz files
+*.tar
+*.tgz

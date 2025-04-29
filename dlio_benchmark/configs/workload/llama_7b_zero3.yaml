@@ -1,9 +1,9 @@
+# 8 node run with 4 GPUs per node and TPSIZE=4 and PPSIZE=8
 model:
   name: llama_7b_zero3
   type: transformer
+  model_size: 30102
   num_layers: 32
-  model_datatype: fp16
-  optimizer_datatype: fp32
   parallelism: 
     pipeline: 1
     tensor: 1
@@ -12,19 +12,58 @@ model:
     vocab_size: 32000
     hidden_size: 4096
     ffn_hidden_size: 11008
-    num_attention_heads: 32
-    num_kv_heads: 32
+
+# -------- correct place for these two keys --------
+storage:
+  storage_type: s3          # use our Rust-backed StorageFactory path
+  storage_root: my-bucket   # bucket name only
+# --------------------------------------------------
 
 framework: pytorch
 
 workflow:
-  generate_data: False
-  train: False
+  generate_data: True
+  train: True
   checkpoint: True
+  format: npz
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  generator_classname: dlio_benchmark.data_generator.npz_s3_generator.NPZS3Generator
+  # ----------------------------------------
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  reader_classname: dlio_benchmark.reader.npz_s3_reader.NPZS3Reader  
+  # ----------------------------------------
+
+dataset: 
+  data_folder: data/llama_7b/
+  format: mmap_indexed_binary
+  num_files_train: 1
+  num_samples_per_file: 1048576
+  record_length: 2048
+  
+reader: 
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  generator_classname: dlio_benchmark.data_generator.npz_s3_generator.NPZS3Generator
+  # ----------------------------------------
+  data_loader: pytorch
+  batch_size: 16
+  read_threads: 1
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  reader_classname: dlio_benchmark.reader.npz_s3_reader.NPZS3Reader  
+  # ----------------------------------------
+  epochs: 1
+  computation_time: 5 # This is not actual measurement. Just set an interval so that checkpoint every 5 seconds
+  total_training_steps: 5
 
 checkpoint:
+
   checkpoint_folder: checkpoints/llama_7b_zero3
-  time_between_checkpoints: 5
-  num_checkpoints_write: 10
-  num_checkpoints_read: 10
-  fsync: True
+  steps_between_checkpoints: 1
+  model_datatype: fp16
+  optimizer_datatype: fp32
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  checkpoint_mechanism_class: dlio_benchmark.checkpointing.s3_checkpoint_writer.S3CheckpointWriter
+  # ----------------------------------------

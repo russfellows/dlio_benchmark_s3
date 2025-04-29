@@ -1,3 +1,21 @@
+[project]
+name = "dlio_benchmark"
+version = "2.0.0"
+requires-python = ">=3.12"
+dynamic = [
+  "description",
+  "readme",
+  "authors",
+  "keywords",
+  "classifiers",
+  "urls",
+  "scripts",
+  "dependencies",
+  "optional-dependencies",
+]
+
+
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
