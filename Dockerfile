@@ -1,62 +1,98 @@
+# Use a suitable Ubuntu base image
 FROM ubuntu:24.04
 
+# Set the working directory for the main project
 WORKDIR /workdir/dlio
 
-# Combine apt-get update and install into a single RUN command to reduce layers
+# Set a non-interactive frontend for apt commands
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+# Includes tools for building, git for cloning, and libraries needed by the benchmark/dependencies
 RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    wget bc curl vim-tiny git iproute2 sysstat mpich libc6 libhwloc-dev zlib1g-dev cmake && \
+    apt-get install -y --no-install-recommends \
+    wget curl vim-tiny git iproute2 sysstat mpich libmpich-dev libc6 \
+    libhwloc-dev zlib1g-dev cmake build-essential **ca-certificates** && \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv and set PATH
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Update PATH
+# Install Rust toolchain using rustup (standard method)
+# This adds cargo and rustc to the PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+
+# Install uv (a fast Python package installer and runner)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Now use uv to install python and initialize our environment 
+# Install Python 3.12 and initialize uv virtual environment
 RUN uv python install 3.12.9 && \
     uv venv && \
     uv init
 
-# Install Python dependencies
-#COPY requirements.txt /workdir/dlio
-# Copy everything except what our .dockerignore ignores
-COPY . /workdir/dlio 
-RUN rm -rf /workdir/dlio/dlio_benchmark.orig
+# Install maturin - needed to build Rust-based Python wheels
+# We install it in the uv venv so it's available for the build step
+RUN uv pip install maturin
 
-#RUN uv pip install git+https://github.com/argonne-lcf/dlio_benchmark.git@main 
-#RUN uv pip install https://github.com/russfellows/dlio_benchmark_s3.git
+# --- Add the uv venv bin directory to the PATH ---
+# This is crucial to make maturin (and other venv executables) directly available
+ENV PATH="/workdir/dlio/.venv/bin:${PATH}"
 
-#ARG REPO_URL="https://github.com/russfellows/dlio_benchmark_s3.git"
-#ARG BRANCH="main"
-#RUN git clone --branch ${BRANCH} ${REPO_URL} .
-#RUN rm -rf /workdir/dlio/.git 
+# --- Build and Install the main dlio_benchmark project ---
 
-# Add extra URL so we pick up latest from nvidia at pypi
+# Copy the main dlio_benchmark project source code from your build context
+# Ensure your .dockerignore excludes unnecessary files
+COPY . /workdir/dlio
+
+# Install the main project's Python dependencies from requirements.txt
+# This includes the NVIDIA DALI package from the extra index
 RUN uv pip install --extra-index-url https://pypi.nvidia.com/ -r requirements.txt
 
-# Removed the python between run and setup.py
-#RUN uv run setup.py build && \
-#    uv run setup.py install 
+# Build and install the main dlio_benchmark project using its pyproject.toml/setup.py
+# uv build uses the build backend to create a wheel, then uv pip install installs it
+RUN uv build && uv pip install ./dist/*.whl
 
-# New way to build 
-RUN uv build && uv pip install ./dist/*.whl 
+# --- Build and Install dlio_s3_rust project ---
 
-# STEP 10: Copy the Rust executable to /usr/local/bin
-COPY dlio_s3_rust/release/s3Rust-cli /usr/local/bin/
+# Create a separate working directory for the rust project build
+# This keeps its build artifacts separate from the main project
+WORKDIR /tmp/dlio_s3_rust
 
-# STEP 12: Install the Python wheel using uv pip install
-RUN uv pip install ./dlio_s3_rust/wheels/dlio_s3_rust-*-cp312-cp312-manylinux_2_39_x86_64.whl
+# Clone the dlio_s3_rust repository source code
+# Replace 'main' with the desired branch if needed
+RUN git clone --depth 1 https://github.com/russfellows/dlio_s3_rust.git .
 
-# Clean up unnecessary files to reduce image size
-RUN apt-get clean && \
-    chmod +x ./dlio_benchmark/*.py && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# Build the Rust executable and the Python wheel
 
-RUN rm -f environment-ppc.yaml hello.py pyproject.toml.old requirements.txt.old setup.py.old
+# Set PYO3 compatibility flag.
+ENV PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 
-#source .venv/bin/activate
-#ENV PATH="/workdir/dlio/.venv/bin/activate:${PATH}"
+# Build the Rust CLI executable.
+RUN uv run cargo build --release
 
-ENTRYPOINT /bin/bash
+# Copy the CLI executable to /usr/local/bin.
+RUN cp target/release/s3Rust-cli /usr/local/bin/s3Rust-cli
+
+# Build and install the Python extension into the virtual environment.
+RUN maturin build --release --features extension-module
+#RUN uv run maturin build --release --features extension-module
+#RUN uv run maturin develop --release --features extension-module
+
+# Install the built Python wheel using uv
+# The wheel will be in target/wheels/
+RUN uv pip install target/wheels/*.whl
+
+# --- Final Cleanup ---
+
+# Clean up temporary build directories and package lists to reduce image size
+RUN rm -rf /tmp/dlio_s3_rust /var/lib/apt/lists/* /root/.cargo /root/.rustup
+
+# Ensure the main benchmark scripts are executable (adjust path if needed)
+# WORKDIR is currently /tmp/dlio_s3_rust, let's switch back to the main project dir
+WORKDIR /workdir/dlio
+RUN chmod +x dlio_benchmark/*.py
+
+# Define the default command to run when the container starts
+ENTRYPOINT ["/workdir/dlio/docker-entrypoint.sh"]
+CMD ["/bin/bash"]
