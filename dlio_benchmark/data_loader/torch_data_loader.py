@@ -1,5 +1,5 @@
 """
-   Copyright (c) 2025, UChicago Argonne, LLC
+   Copyright (c) 2024, UChicago Argonne, LLC
    All Rights Reserved
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +22,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.sampler import Sampler
 import numpy as np
+import os
 
 from dlio_benchmark.common.constants import MODULE_DATA_LOADER
 from dlio_benchmark.common.enumerations import Shuffle, DatasetType, DataLoaderType
@@ -31,7 +32,36 @@ from dlio_benchmark.utils.utility import utcnow, DLIOMPI
 from dlio_benchmark.utils.config import ConfigArguments
 from dlio_benchmark.utils.utility import Profile
 
+# Add to count stats correctly 
+from torch.utils.data._utils.collate import default_collate
+from dlio_benchmark.common.constants import MODULE_DATA_LOADER
+from dlio_benchmark.utils.utility import Profile
+
 dlp = Profile(MODULE_DATA_LOADER)
+
+#
+# Probably need to delete this function
+#
+def collate_and_profile(batch):
+    # batch is a list of numpy arrays or torch.Tensors
+    total_bytes = 0
+    for item in batch:
+        # if numpy array, .nbytes; if Tensor, convert to numpy
+        if hasattr(item, "nbytes"):
+            total_bytes += item.nbytes
+        else:
+            total_bytes += item.detach().cpu().numpy().nbytes
+
+    # record I/O bytes and sample count in main
+    print(f"[DEBUG_STATS][collate_and_profile pid={os.getpid()}] batch_size={len(batch)} total_bytes={total_bytes}")
+    #  The next two lines should probably stay 
+    dlp.update(image_size=total_bytes)
+    dlp.update(step=len(batch))   # 
+    #  I think these are bogus, probably delete next two lintes 
+    #stats.update(image_size=total_bytes)
+    #stats.update(step=len(batch))
+
+    return default_collate(batch)
 
 
 class TorchDataset(Dataset):
@@ -51,7 +81,6 @@ class TorchDataset(Dataset):
         self.batch_size = batch_size
         args = ConfigArguments.get_instance()
         self.serial_args = pickle.dumps(args)
-        self.logger = args.logger
         self.dlp_logger = None
         if num_workers == 0:
             self.worker_init(-1)
@@ -62,7 +91,7 @@ class TorchDataset(Dataset):
         _args = ConfigArguments.get_instance()
         _args.configure_dlio_logging(is_child=True)
         self.dlp_logger = _args.configure_dftracer(is_child=True, use_pid=True)
-        self.logger.debug(f"{utcnow()} worker initialized {worker_id} with format {self.format_type}")
+        logging.debug(f"{utcnow()} worker initialized {worker_id} with format {self.format_type}")
         self.reader = ReaderFactory.get_reader(type=self.format_type,
                                                dataset_type=self.dataset_type,
                                                thread_index=worker_id,
@@ -80,7 +109,7 @@ class TorchDataset(Dataset):
     def __getitem__(self, image_idx):
         self.num_images_read += 1
         step = int(math.ceil(self.num_images_read / self.batch_size))
-        self.logger.debug(f"{utcnow()} Rank {DLIOMPI.get_instance().rank()} reading {image_idx} sample")
+        logging.debug(f"{utcnow()} Rank {DLIOMPI.get_instance().rank()} reading {image_idx} sample")
         dlp.update(step = step)
         return self.reader.read_index(image_idx, step)
 
@@ -122,14 +151,36 @@ class TorchDataLoader(BaseDataLoader):
             prefetch_factor = self._args.prefetch_size
         if prefetch_factor > 0:
             if self._args.my_rank == 0:
-                self.logger.debug(
+                logging.debug(
                     f"{utcnow()} Prefetch size is {self._args.prefetch_size}; prefetch factor of {prefetch_factor} will be set to Torch DataLoader.")
         else:
             prefetch_factor = 2
             if self._args.my_rank == 0:
-                self.logger.debug(
+                logging.debug(
                     f"{utcnow()} Prefetch size is 0; a default prefetch factor of 2 will be set to Torch DataLoader.")
-        self.logger.debug(f"{utcnow()} Setup dataloader with {self._args.read_threads} workers {torch.__version__}")
+        logging.debug(f"{utcnow()} Setup dataloader with {self._args.read_threads} workers {torch.__version__}")
+
+        #
+        # Do we ?   
+        # We need to modify the threading and allow spawning
+        # This is the code to do so if desired 
+        #
+        #import multiprocessing as mp
+        #
+        #if self._args.read_threads == 0:
+        #    kwargs = {}
+        #else:
+        #    # create a fresh spawn‐based context
+        #    spawn_ctx = mp.get_context("spawn")
+        #    kwargs = {
+        #        "multiprocessing_context": spawn_ctx,
+        #        "prefetch_factor": prefetch_factor,
+        #        "persistent_workers": (torch.__version__ != "1.3.1"),
+        #    }
+
+        #
+        # Orig code, with forking mp 
+        #
         if self._args.read_threads==0:
             kwargs={}
         else:
@@ -137,6 +188,15 @@ class TorchDataLoader(BaseDataLoader):
                     'prefetch_factor': prefetch_factor}
             if torch.__version__ != '1.3.1':       
                 kwargs['persistent_workers'] = True
+
+        #
+        # End MP mods
+        #
+
+        #
+        # Did have a call to "collate_and_profile" but is this nececssary?
+        # Commented out the call in both branches of if below 
+        #
         if torch.__version__ == '1.3.1':
             if 'prefetch_factor' in kwargs:
                 del kwargs['prefetch_factor']
@@ -147,6 +207,7 @@ class TorchDataLoader(BaseDataLoader):
                                        pin_memory=self._args.pin_memory,
                                        drop_last=True,
                                        worker_init_fn=dataset.worker_init, 
+                                       #collate_fn=collate_and_profile,   # Added for multi threaded stats
                                        **kwargs)
         else: 
             self._dataset = DataLoader(dataset,
@@ -156,8 +217,9 @@ class TorchDataLoader(BaseDataLoader):
                                        pin_memory=self._args.pin_memory,
                                        drop_last=True,
                                        worker_init_fn=dataset.worker_init,
+                                       #collate_fn=collate_and_profile,   # Added for multi threaded stats
                                        **kwargs)  # 2 is the default value
-        self.logger.debug(f"{utcnow()} Rank {self._args.my_rank} will read {len(self._dataset) * self.batch_size} files")
+        logging.debug(f"{utcnow()} Rank {self._args.my_rank} will read {len(self._dataset) * self.batch_size} files")
 
         # self._dataset.sampler.set_epoch(epoch_number)
 
@@ -165,17 +227,56 @@ class TorchDataLoader(BaseDataLoader):
     def next(self):
         super().next()
         total = self._args.training_steps if self.dataset_type is DatasetType.TRAIN else self._args.eval_steps
-        self.logger.debug(f"{utcnow()} Rank {self._args.my_rank} should read {total} batches")
+        logging.debug(f"{utcnow()} Rank {self._args.my_rank} should read {total} batches")
         step = 1
         # TODO: @hariharan-devarajan: change below line when we bump the dftracer version to 
         #       `dlp.iter(self._dataset, name=self.next.__qualname__)`
+
+        #
+        # Orig code to count batches
+        #
+        #for batch in dlp.iter(self._dataset):
+        #    dlp.update(step = step)
+        #    step += 1
+        #    yield batch
+
+        #
+        # New Code for batches
+        #
         for batch in dlp.iter(self._dataset):
-            dlp.update(step = step)
+            # 1) compute total bytes in this batch
+            try:
+                import numpy as _np
+                batch_bytes = 0
+                # assume batch is a tensor or tuple/list of arrays
+                for x in batch if isinstance(batch, (list,tuple)) else (batch,):
+                    arr = x.detach().cpu().numpy() if hasattr(x, "detach") else _np.asarray(x)
+                    batch_bytes += arr.nbytes
+                dlp.update(image_size=batch_bytes)         # count I/O bytes
+            except Exception:
+                pass
+
+            # 2) count the samples
+            print(f"[DEBUG_STATS][next pid={os.getpid()}] yielding batch of {len(batch)} samples, step={step}")
+            # Next line stays for now, maybe delete
+            dlp.update(step=step)
+            # Next line seems to be a problem 
+            #stats.update(step=step)
+
+            # Now update counter
             step += 1
             yield batch
+     
+        #
+        # End code mod for batch counting
+        #
+
         self.epoch_number += 1
         dlp.update(epoch=self.epoch_number)
 
     @dlp.log
     def finalize(self):
         pass
+
+
+

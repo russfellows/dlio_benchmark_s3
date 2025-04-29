@@ -1,5 +1,5 @@
 """
-   Copyright (c) 2025, UChicago Argonne, LLC
+   Copyright (c) 2024, UChicago Argonne, LLC
    All Rights Reserved
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,7 +36,7 @@ class ReaderFactory(object):
         _args = ConfigArguments.get_instance()
         if _args.reader_class is not None:
             if DLIOMPI.get_instance().rank() == 0:
-                self.logger.info(f"{utcnow()} Running DLIO with custom data loader class {_args.reader_class.__name__}")
+                logging.info(f"{utcnow()} Running DLIO with custom data loader class {_args.reader_class.__name__}")
             return _args.reader_class(dataset_type, thread_index, epoch_number)
         elif type == FormatType.HDF5:
             from dlio_benchmark.reader.hdf5_reader import HDF5Reader
@@ -59,6 +59,10 @@ class ReaderFactory(object):
                 from dlio_benchmark.reader.npy_reader import NPYReader
                 return NPYReader(dataset_type, thread_index, epoch_number)                         
         elif type == FormatType.NPZ:
+            # if we are using S3 call the s3-backend reader
+            if _args.storage_type == "s3":
+                from dlio_benchmark.reader.npz_s3_reader import NPZS3Reader
+                return NPZS3Reader(dataset_type, thread_index, epoch_number)
             if _args.data_loader == DataLoaderType.NATIVE_DALI:
                 raise Exception("Loading data of %s format is not supported without framework data loader; please use npy format instead." %type)
             else:
@@ -83,3 +87,4 @@ class ReaderFactory(object):
 
         else:
             raise Exception("Loading data of %s format is not supported without framework data loader" %type)
+

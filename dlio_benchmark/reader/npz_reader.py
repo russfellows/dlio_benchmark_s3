@@ -1,5 +1,5 @@
 """
-   Copyright (c) 2025, UChicago Argonne, LLC
+   Copyright (c) 2024, UChicago Argonne, LLC
    All Rights Reserved
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
    limitations under the License.
 """
 import numpy as np
+import os
 
 from dlio_benchmark.common.constants import MODULE_DATA_READER
 from dlio_benchmark.reader.reader_handler import FormatReader
@@ -45,6 +46,7 @@ class NPZReader(FormatReader):
     def get_sample(self, filename, sample_index):
         super().get_sample(filename, sample_index)
         image = self.open_file_map[filename][..., sample_index]
+        print(f"[DEBUG_STATS][get_sample pid={os.getpid()}] filename={filename} sample_index={sample_index} image_size={image.nbytes}")
         dlp.update(image_size=image.nbytes)
 
     def next(self):
@@ -53,6 +55,7 @@ class NPZReader(FormatReader):
 
     @dlp.log
     def read_index(self, image_idx, step):
+        print(f"[DEBUG_STATS][read_index pid={os.getpid()}] image_idx={image_idx} step={step}")
         dlp.update(step=step)
         return super().read_index(image_idx, step)
 

@@ -1,5 +1,5 @@
 """
-   Copyright (c) 2025, UChicago Argonne, LLC
+   Copyright (c) 2024, UChicago Argonne, LLC
    All Rights Reserved
 
    Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,12 +14,14 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 """
+# File: dlio_benchmark/data_generator/npz_generator.py
 
 from dlio_benchmark.common.enumerations import Compression
 from dlio_benchmark.data_generator.data_generator import DataGenerator
 
 import logging
 import numpy as np
+import os
 
 from dlio_benchmark.utils.utility import progress, utcnow
 from dlio_benchmark.utils.utility import Profile
@@ -36,6 +38,21 @@ class NPZGenerator(DataGenerator):
         super().__init__()
 
     @dlp.log
+    def save_file(self, out_path_spec: str, x, y):
+        """
+        Hook for writing one NPZ.
+        By default: write to local disk at out_path_spec + '.npz'
+        """
+        path = out_path_spec + ".npz"
+        dirname = os.path.dirname(path)
+        if dirname and not os.path.isdir(dirname):
+            os.makedirs(dirname, exist_ok=True)
+
+        if self.compression != Compression.ZIP:
+            np.savez(path, x=x, y=y)
+        else:
+            np.savez_compressed(path, x=x, y=y)
+
     def generate(self):
         """
         Generator for creating data in NPZ format of 3d dataset.
@@ -48,11 +65,13 @@ class NPZGenerator(DataGenerator):
             dim1 = dim[2*i]
             dim2 = dim[2*i+1]
             records = np.random.randint(255, size=(dim1, dim2, self.num_samples), dtype=np.uint8)
+
             out_path_spec = self.storage.get_uri(self._file_list[i])
             progress(i+1, self.total_files_to_generate, "Generating NPZ Data")
-            prev_out_spec = out_path_spec
-            if self.compression != Compression.ZIP:
-                np.savez(out_path_spec, x=records, y=record_labels)
-            else:
-                np.savez_compressed(out_path_spec, x=records, y=record_labels)
+
+            # delegate the actual write to our hook
+            self.save_file(out_path_spec, records, record_labels)
+
+        # restore randomness
         np.random.seed()
+

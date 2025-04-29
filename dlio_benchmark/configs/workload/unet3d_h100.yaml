@@ -1,39 +1,67 @@
 model: 
   name: unet3d
-  type: cnn
-  model_size: 499153191
 
 framework: pytorch
 
+# -------- correct place for these two keys --------
+storage:
+  storage_type: s3          # use our Rust-backed StorageFactory path
+  storage_root: my-bucket   # bucket name only
+# --------------------------------------------------
+
 workflow:
-  generate_data: False
+  #generate_data: False
+  generate_data: True
   train: True
-  checkpoint: True
+  #checkpoint: True
+  checkpoint: False
+  format: npz
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  generator_classname: dlio_benchmark.data_generator.npz_s3_generator.NPZS3Generator
+  # ----------------------------------------
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  reader_classname: dlio_benchmark.reader.npz_s3_reader.NPZS3Reader  
+  # ----------------------------------------
 
 dataset: 
   data_folder: data/unet3d/
   format: npz
   num_files_train: 168
   num_samples_per_file: 1
-  record_length_bytes: 146600628
-  record_length_bytes_stdev: 68341808
-  record_length_bytes_resize: 2097152
+  record_length: 146600628
+  record_length_stdev: 68341808
+  record_length_resize: 2097152
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  generator_classname: dlio_benchmark.data_generator.npz_s3_generator.NPZS3Generator
+  # ----------------------------------------
   
 reader: 
   data_loader: pytorch
   batch_size: 7
-  read_threads: 4
+  #read_threads: 1
+  #prefetch_size: 4
+  #read_threads: 4
+  read_threads: 0
   file_shuffle: seed
   sample_shuffle: seed
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  reader_classname: dlio_benchmark.reader.npz_s3_reader.NPZS3Reader  
+  # ----------------------------------------
 
 train:
   epochs: 5
   computation_time: 0.323
 
+
 checkpoint:
   checkpoint_folder: checkpoints/unet3d
   checkpoint_after_epoch: 5
   epochs_between_checkpoints: 2
+  model_size: 499153191
+  # ---------- tell DLIO to use the Rust S3 functions ----------
+  checkpoint_mechanism_class: dlio_benchmark.checkpointing.s3_checkpoint_writer.S3CheckpointWriter
+  # ----------------------------------------
 
 metric:
   au: 0.90
+
