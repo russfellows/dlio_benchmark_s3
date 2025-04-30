@@ -5,7 +5,7 @@ The main Readme for DLIO is available on that GitHub repo and in other on-line d
 
 ## Deep Learning I/O (DLIO) Benchmark
 
-This README provides an abbreviated documentation of the DLIO code. Please refer to https://dlio-benchmark.readthedocs.io for full user documentation. 
+The DLIO README in its github repository provides documentation of the DLIO code. Please refer to [DLIO Docs](https://dlio-benchmark.readthedocs.io) for full user documentation. 
 
 ## Overview
 
