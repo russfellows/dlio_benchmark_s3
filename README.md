@@ -11,8 +11,11 @@ This README provides an abbreviated documentation of the DLIO code. Please refer
 
 DLIO is an I/O benchmark for Deep Learning. DLIO is aimed at emulating the I/O behavior of various deep learning applications. The benchmark is delivered as an executable that can be configured for various I/O patterns. It uses a modular design to incorporate more data loaders, data formats, datasets, and configuration parameters. It emulates modern deep learning applications using Benchmark Runner, Data Generator, Format Handler, and I/O Profiler modules. 
 
+# S3 Support
+The intention of this fork is to test S3 access using DLIO.  This project [dlio_benchmark_s3] uses a custom S3 Python library, built using the AWS Rust S3 SDK, which is also available here: [dlio S3 Rust] (https://github.com/russfellows/dlio_s3_rust)
+
 ## Installation and running
-You may of course run this directly as downloaded.  However, some executables are presumed to be in your path.  Due to the variety of paths, OS environments , etc. it is VASTLY more reliable and predictable to run this within a container.  
+You may of course run this directly as downloaded.  However, some executables are presumed to be in your path.  Due to the variety of paths, OS environments , etc. it is VASTLY more reliable and predictable to run this within a container. The container includes the dlio-s3-rust Python library and standalone cli for access to S3.
 
 ## Container
 ```bash
